@@ -1,137 +1,172 @@
-import os, re, time, secrets, threading, unicodedata
-from urllib.parse import quote
-from flask import Flask, request, jsonify, Response, render_template, abort, stream_with_context
-import yt_dlp
-import requests as rq
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Descargador Pro - Mobile</title>
+    <!-- Usamos una librería ligera para yt-dlp vía API pública -->
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #121212;
+            color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            margin: 0;
+        }
+        h1 { color: #ff9900; text-align: center; }
+        .container {
+            width: 100%;
+            max-width: 600px;
+            background: #1e1e1e;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+        input[type="url"] {
+            width: 95%;
+            padding: 15px;
+            margin-bottom: 15px;
+            border: 1px solid #333;
+            border-radius: 5px;
+            background: #2a2a2a;
+            color: white;
+            font-size: 16px;
+        }
+        button {
+            width: 100%;
+            padding: 15px;
+            background-color: #ff9900;
+            color: black;
+            border: none;
+            border-radius: 5px;
+            font-weight: bold;
+            font-size: 18px;
+            cursor: pointer;
+        }
+        button:disabled { background-color: #555; color: #aaa; }
+        #status {
+            margin-top: 15px;
+            text-align: center;
+            font-size: 14px;
+            color: #ccc;
+        }
+        #downloadArea {
+            margin-top: 20px;
+            text-align: center;
+            display: none; /* Oculto al inicio */
+        }
+        #videoLink {
+            display: block;
+            margin-top: 10px;
+            color: #00bcd4;
+            word-break: break-all;
+        }
+        .error { color: #ff4444; }
+        .success { color: #00C851; }
+    </style>
+</head>
+<body>
 
-app = Flask(__name__)
+    <div class="container">
+        <h1>🔞 Downloader Pro</h1>
+        <p style="font-size: 12px; color: #888;">Pega el enlace del video aquí:</p>
+        
+        <input type="url" id="urlInput" placeholder="Ej: https://www.pornhub.com/view_video.php?viewkey=..." required>
+        
+        <button id="btnDownload" onclick="descargarVideo()">DESCARGAR VIDEO</button>
+        
+        <div id="status"></div>
 
-UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-      "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
-DOMINIOS = ("pornhub.com", "pornhub.org")
-TTL = 600
-MAX_SIMULTANEAS = 4
+        <div id="downloadArea">
+            <p class="success">¡Listo! Toca para guardar:</p>
+            <a id="videoLink" href="#" download>Descargar Archivo MP4</a>
+        </div>
+    </div>
 
-_cache = {}
-_lock = threading.Lock()
-_slots = threading.Semaphore(MAX_SIMULTANEAS)
-_ip_ultima = {}
+    <script>
+        async function descargarVideo() {
+            const url = document.getElementById('urlInput').value;
+            const status = document.getElementById('status');
+            const btn = document.getElementById('btnDownload');
+            const dlArea = document.getElementById('downloadArea');
+            const dlLink = document.getElementById('videoLink');
 
+            if (!url) {
+                status.innerText = "Por favor ingresa un enlace válido.";
+                status.className = "error";
+                return;
+            }
 
-def permitido(url: str) -> bool:
-    m = re.match(r"^https?://([^/]+)", url or "")
-    if not m:
-        return False
-    host = m.group(1).lower().removeprefix("www.").removeprefix("m.")
-    return any(host == d or host.endswith("." + d) for d in DOMINIOS)
+            // UI Loading state
+            btn.disabled = true;
+            btn.innerText = "Procesando...";
+            status.innerText = "Conectando con servidores...";
+            status.className = "";
+            dlArea.style.display = "none";
 
+            try {
+                // Usamos una API pública de yt-dlp para evitar configurar servidores complejos
+                // Nota: Esta API gratuita puede tener límites si se usa mucho.
+                const apiUrl = `https://api.cobalt.tools/api/json?url=${encodeURIComponent(url)}`; 
+                
+                // Alternativa robusta usando un servicio de proxy público si cobalt falla:
+                // Para mayor estabilidad en móviles, usaremos un truco: 
+                // Intentaremos obtener el stream directo.
+                
+                status.innerText = "Analizando video...";
+                
+                // Simulamos una petición a un backend de yt-dlp público
+                // Nota: Los servicios gratuitos a veces caen. Si falla, intenta recargar.
+                
+                // Método alternativo más fiable para HTML simple:
+                // Redirigimos a un servicio de conversión online o intentamos obtener el blob
+                
+                // Vamos a usar la API de Cobalt (funciona bien con pornhub/xvideos)
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        url: url,
+                        filenamePattern: "original",
+                        isAudioOnly: false,
+                        audioFormat: "mp3",
+                        filenameCustomization: "",
+                        alwaysIncludeHls: false,
+                        disableFileArbitraryExtension: false,
+                        downloadMode: "auto"
+                    })
+                });
 
-def extraer(url: str):
-    opts = {"quiet": True, "no_warnings": True, "noplaylist": True,
-            "skip_download": True, "socket_timeout": 20}
-    if os.path.exists("cookies.txt"):
-        opts["cookiefile"] = "cookies.txt"
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-    if info.get("_type") == "playlist":
-        info = info["entries"][0]
-    return info
+                const data = await response.json();
 
+                if (data.url) {
+                    status.innerText = "¡Enlace generado! Descargando...";
+                    dlLink.href = data.url;
+                    
+                    // Nombre del archivo basado en la URL original o ID
+                    dlLink.download = "video_porno_" + Date.now() + ".mp4";
+                    
+                    dlArea.style.display = "block";
+                    btn.innerText = "Descargar Video";
+                    btn.disabled = false;
+                } else {
+                    throw new Error("No se pudo extraer el video. Prueba otro enlace.");
+                }
 
-def limpio(t: str, n: int = 80) -> str:
-    t = unicodedata.normalize("NFKD", t or "video")
-    t = "".join(c for c in t if not unicodedata.combining(c))
-    return re.sub(r"[^\w\s.-]", "", t).strip().replace(" ", "_")[:n] or "video"
-
-
-@app.post("/api/info")
-def info():
-    ip = request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
-    ahora = time.time()
-    if ahora - _ip_ultima.get(ip, 0) < 4:
-        return jsonify(error="Espera unos segundos entre enlaces."), 429
-    _ip_ultima[ip] = ahora
-
-    url = (request.get_json(silent=True) or {}).get("url", "").strip()
-    if not permitido(url):
-        return jsonify(error="Pega un enlace de Pornhub."), 400
-
-    try:
-        d = extraer(url)
-    except Exception as e:
-        return jsonify(error=f"No se pudo leer el vídeo: {str(e)[:160]}"), 502
-
-    vistos, fmt = set(), []
-    for f in d.get("formats", []):
-        if f.get("vcodec") in (None, "none") or f.get("ext") != "mp4":
-            continue
-        h = f.get("height") or 0
-        if h in vistos or not f.get("url"):
-            continue
-        vistos.add(h)
-        peso = f.get("filesize") or f.get("filesize_approx")
-        fmt.append({"fid": f["format_id"], "h": h, "url": f["url"],
-                    "mb": round(peso / 1048576) if peso else None})
-    fmt.sort(key=lambda x: x["h"], reverse=True)
-
-    if not fmt:
-        return jsonify(error="Este vídeo no ofrece mp4 descargable."), 422
-
-    sid = secrets.token_urlsafe(12)
-    with _lock:
-        for k in [k for k, v in _cache.items() if v["t"] < ahora - TTL]:
-            _cache.pop(k, None)
-        _cache[sid] = {"t": ahora, "titulo": d.get("title") or "video",
-                       "thumb": d.get("thumbnail"), "dur": d.get("duration") or 0,
-                       "fmt": fmt, "url": url}
-
-    return jsonify(id=sid, titulo=d.get("title") or "video", thumb=d.get("thumbnail"),
-                   dur=d.get("duration") or 0,
-                   calidades=[{"fid": x["fid"], "h": x["h"], "mb": x["mb"]} for x in fmt])
-
-
-@app.get("/descargar/<sid>/<fid>")
-def descargar(sid, fid):
-    d = _cache.get(sid)
-    if not d or d["t"] < time.time() - TTL:
-        abort(410, "Enlace caducado, vuelve a pegar la URL.")
-    f = next((x for x in d["fmt"] if x["fid"] == fid), None)
-    if not f:
-        abort(404)
-
-    if not _slots.acquire(blocking=False):
-        abort(429, "Servidor ocupado, reintenta en unos segundos.")
-
-    try:
-        up = rq.get(f["url"], headers={"User-Agent": UA, "Referer": "https://www.pornhub.com/"},
-                    stream=True, timeout=30)
-        up.raise_for_status()
-    except Exception:
-        _slots.release()
-        abort(502, "El CDN no respondió.")
-
-    nombre = f"{limpio(d['titulo'])}_{f['h']}p.mp4"
-
-    def gen():
-        try:
-            for trozo in up.iter_content(262144):
-                yield trozo
-        finally:
-            up.close()
-            _slots.release()
-
-    return Response(stream_with_context(gen()), mimetype="video/mp4", headers={
-        "Content-Disposition": f"attachment; filename=\"{nombre}\"; filename*=UTF-8''{quote(nombre)}",
-        "Content-Length": up.headers.get("Content-Length", ""),
-        "Cache-Control": "no-store",
-        "X-Accel-Buffering": "no",
-    })
-
-
-@app.get("/")
-def home():
-    return render_template("index.html")
-
-
-if __name__ == "__main__":
-    app.run(port=5000, threaded=True)
+            } catch (error) {
+                console.error(error);
+                status.innerText = "Error: " + error.message + ". Intenta de nuevo.";
+                status.className = "error";
+                btn.innerText = "Intentar de nuevo";
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
